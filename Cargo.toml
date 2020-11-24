@@ -1,0 +1,9 @@
+[package]
+name = "stdio-inspect"
+version = "0.1.0"
+authors = ["Dmitriy Belyaev <mail@d-belyaev.ru>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
