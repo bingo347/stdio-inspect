@@ -2,6 +2,8 @@ use std::env;
 use std::net::SocketAddr;
 use std::ffi::OsString;
 use std::process;
+use env::ArgsOs;
+
 use crate::command::Command;
 
 pub fn collect_config() -> AppConfig {
@@ -11,9 +13,9 @@ pub fn collect_config() -> AppConfig {
 #[derive(Debug)]
 pub struct AppConfig {
     pub command: Option<Command>,
+    pub udp: Option<SocketAddr>,
     pub view_only: bool,
-    pub gui: bool,
-    pub udp: Option<SocketAddr>
+    pub gui: bool
 }
 
 macro_rules! print_usage {
@@ -41,7 +43,7 @@ EXAMPLES:
     stdio-inspect --port 9000 --gui -
         - listen UPD port 9000 and show it in GUI
 ");
-        process::exit($code);
+        process::exit($code)
     }};
 }
 macro_rules! error {
@@ -49,13 +51,13 @@ macro_rules! error {
         eprint!("Error: ");
         eprintln!($msg);
         eprintln!();
-        print_usage!(-1);
+        print_usage!(-1)
     }};
     ($fmt:expr, $($arg:tt)+) => {{
         eprint!("Error: ");
         eprintln!($fmt, $($arg)+);
         eprintln!();
-        print_usage!(-1);
+        print_usage!(-1)
     }};
 }
 
@@ -63,33 +65,32 @@ impl AppConfig {
     fn collect() -> Self {
         let mut view_only = false;
         let mut gui = false;
-        let (command, udp) = read_args(|arg| match arg {
+        let mut host = None;
+        let mut port = None;
+        let command = read_args(|arg, args| match arg {
             "-" => view_only = true,
             "--gui" => gui = true,
+            "--host" | "-h" => host = args.next(),
+            "--port" | "-p" => port = args.next(),
             "--help" | "-?" => print_usage!(),
             _ => error!("Unknown argument {}", arg)
         });
-        Self { command, view_only, gui, udp }.check_continue()
-    }
-
-    fn check_continue(self) -> Self {
-        if let Some(ref udp) = self.udp {
-            if udp.port() == 0 {
-                error!("Host argument without port is not supported");
-            }
+        let udp = make_udp(host, port, view_only);
+        match view_only {
+            true if udp.is_none() => error!("View only mode required udp port"),
+            false if command.is_none() => error!("<executable> required"),
+            _ => Self { command, view_only, gui, udp }
         }
-        if !self.view_only && self.command.is_none() {
-            print_usage!(-1);
-        }
-        self
     }
 }
 
-fn read_args(mut matcher: impl FnMut(&str)) -> (Option<Command>, Option<SocketAddr>) {
-    let mut udp = None;
+fn read_args<Matcher>(mut matcher: Matcher) -> Option<Command>
+where
+    Matcher: FnMut(&str, &mut ArgsOs)
+{
     macro_rules! ret {
-        () => { return (None, udp); };
-        ($input:expr) => { return (Command::new($input), udp); };
+        () => { return None; };
+        ($input:expr) => { return Command::new($input); };
     }
     let mut args = env::args_os();
     args.next().expect("First argument always some executable");
@@ -100,17 +101,7 @@ fn read_args(mut matcher: impl FnMut(&str)) -> (Option<Command>, Option<SocketAd
                     if !arg.starts_with('-') { ret!((arg, args)) }
                     match arg.as_ref() {
                         "--" => ret!(args),
-                        "--port" | "-p" => {
-                            if !update_address(&mut udp, None, args.next()) {
-                                error!("Port argument without value");
-                            }
-                        },
-                        "--host" | "-h" => {
-                            if !update_address(&mut udp, args.next(), None) {
-                                error!("Host argument without value");
-                            }
-                        },
-                        other => matcher(other)
+                        other => matcher(other, &mut args)
                     }
                 },
                 Err(command) => ret!((command, args))
@@ -120,33 +111,28 @@ fn read_args(mut matcher: impl FnMut(&str)) -> (Option<Command>, Option<SocketAd
     }
 }
 
-fn update_address(addr: &mut Option<SocketAddr>, host: Option<OsString>, port: Option<OsString>) -> bool {
-    match *addr {
-        Some(ref mut addr) => {
-            if let Some(host) = host {
-                use std::net::{IpAddr, Ipv6Addr};
-                const ERR: &str = "Invalid argument host";
-                let host = host.into_string().expect(ERR);
-                let host: IpAddr = if host == "localhost" {
-                    IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
-                } else {
-                    host.parse().expect(ERR)
-                };
-                addr.set_ip(host);
-                true
-            } else if let Some(port) = port {
-                const ERR: &str = "Invalid argument port";
-                let port = port.into_string().expect(ERR);
-                let port: u16 = port.parse().expect(ERR);
-                addr.set_port(port);
-                true
-            } else {
-                false
-            }
+fn make_udp(host: Option<OsString>, port: Option<OsString>, view_only: bool) -> Option<SocketAddr> {
+    use std::net::{IpAddr, Ipv6Addr};
+    fn err(arg_name: &str) -> ! { error!("Invalid argument {}", arg_name); }
+    match port {
+        Some(port) => {
+            let port = port.into_string().unwrap_or_else(|_| err("port"));
+            let port: u16 = port.parse().unwrap_or_else(|_| err("port"));
+            Some(SocketAddr::new(match host {
+                Some(host) => {
+                    let host = host.into_string().unwrap_or_else(|_| err("host"));
+                    if host == "localhost" {
+                        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                    } else {
+                        host.parse().unwrap_or_else(|_| err("host"))
+                    }
+                },
+                _ => IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, if view_only { 0 } else { 1 }))
+            }, port))
         },
-        None => {
-            *addr = Some(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 0)));
-            update_address(addr, host, port)
+        _ => match host {
+            None => None,
+            _ => error!("Host argument without port is not supported")
         }
     }
 }
