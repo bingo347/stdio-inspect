@@ -1,95 +1,123 @@
 use std::env;
 use std::net::SocketAddr;
 use std::ffi::OsString;
+use std::process;
+use crate::command::Command;
+
+pub fn collect_config() -> AppConfig {
+    AppConfig::collect()
+}
 
 #[derive(Debug)]
 pub struct AppConfig {
-    pub args: env::ArgsOs,
-    pub command: Option<OsString>,
+    pub command: Option<Command>,
     pub view_only: bool,
     pub gui: bool,
     pub udp: Option<SocketAddr>
 }
 
+macro_rules! print_usage {
+    () => { print_usage!(0) };
+    ($code:expr) => {{
+        eprint!("Standard IO inspecting tool
+
+USAGE:
+    stdio-inspect [OPTIONS] <executable> [ARGS]
+    stdio-inspect [OPTIONS] -
+
+OPTIONS:
+    --gui                     - Show in GUI
+    --host <HOST>, -h <HOST>  - UDP hostname
+    --port <PORT>, -p <PORT>  - UDP port
+    --help, -?                - Print this help
+
+EXAMPLES:
+    stdio-inspect --gui <executable>
+        - inspect executable and show it stdio in GUI
+    stdio-inspect --port 9000 <executable>
+        - inspect executable and send it stdio to UPD port 9000
+    stdio-inspect --port 9000 -
+        - listen UPD port 9000 and print it to stdout
+    stdio-inspect --port 9000 --gui -
+        - listen UPD port 9000 and show it in GUI
+");
+        process::exit($code);
+    }};
+}
+macro_rules! error {
+    ($msg:expr) => {{
+        eprint!("Error: ");
+        eprintln!($msg);
+        eprintln!();
+        print_usage!(-1);
+    }};
+    ($fmt:expr, $($arg:tt)+) => {{
+        eprint!("Error: ");
+        eprintln!($fmt, $($arg)+);
+        eprintln!();
+        print_usage!(-1);
+    }};
+}
+
 impl AppConfig {
-    fn new() -> Self {
-        Self {
-            args: env::args_os(),
-            command: None,
-            view_only: false,
-            gui: false,
-            udp: None
-        }
+    fn collect() -> Self {
+        let mut view_only = false;
+        let mut gui = false;
+        let (command, udp) = read_args(|arg| match arg {
+            "-" => view_only = true,
+            "--gui" => gui = true,
+            "--help" | "-?" => print_usage!(),
+            _ => error!("Unknown argument {}", arg)
+        });
+        Self { command, view_only, gui, udp }.check_continue()
     }
 
-    fn read_args(mut self) -> Self {
-        self.args.next().expect("First argument always some executable");
-        loop {
-            match self.args.next() {
-                Some(arg) => match arg.into_string() {
-                    Ok(arg) => {
-                        if !arg.starts_with('-') {
-                            self.command = Some(arg.into());
-                            break;
-                        }
-                        match arg.as_ref() {
-                            "-" => {
-                                self.view_only = true;
-                                break;
-                            },
-                            "--" => {
-                                self.command = self.args.next();
-                                break;
-                            },
-                            "--help" | "-?" => {
-                                print_usage();
-                                std::process::exit(0);
-                            },
-                            "--gui" => {
-                                self.gui = true;
-                            },
-                            "--port" | "-p" => {
-                                if !update_address(&mut self.udp, None, self.args.next()) {
-                                    print_usage();
-                                    panic!("Port argument without value");
-                                }
-                            },
-                            "--host" | "-h" => {
-                                if !update_address(&mut self.udp, self.args.next(), None) {
-                                    print_usage();
-                                    panic!("Host argument without value");
-                                }
-                            },
-                            _ => panic!("Unknown argument {}", arg)
-                        }
-                    },
-                    Err(command) => {
-                        self.command = Some(command);
-                        break;
-                    }
-                },
-                None => break
-            }
-        }
-        self.check_continue();
-        self
-    }
-
-    fn check_continue(&self) {
+    fn check_continue(self) -> Self {
         if let Some(ref udp) = self.udp {
             if udp.port() == 0 {
-                panic!("Host argument without port is not supported");
+                error!("Host argument without port is not supported");
             }
         }
-        if !self.view_only && self.command == None {
-            print_usage();
-            std::process::exit(-1);
+        if !self.view_only && self.command.is_none() {
+            print_usage!(-1);
         }
+        self
     }
 }
 
-pub(crate) fn collect_config() -> AppConfig {
-    AppConfig::new().read_args()
+fn read_args(mut matcher: impl FnMut(&str)) -> (Option<Command>, Option<SocketAddr>) {
+    let mut udp = None;
+    macro_rules! ret {
+        () => { return (None, udp); };
+        ($input:expr) => { return (Command::new($input), udp); };
+    }
+    let mut args = env::args_os();
+    args.next().expect("First argument always some executable");
+    loop {
+        match args.next() {
+            Some(arg) => match arg.into_string() {
+                Ok(arg) => {
+                    if !arg.starts_with('-') { ret!((arg, args)) }
+                    match arg.as_ref() {
+                        "--" => ret!(args),
+                        "--port" | "-p" => {
+                            if !update_address(&mut udp, None, args.next()) {
+                                error!("Port argument without value");
+                            }
+                        },
+                        "--host" | "-h" => {
+                            if !update_address(&mut udp, args.next(), None) {
+                                error!("Host argument without value");
+                            }
+                        },
+                        other => matcher(other)
+                    }
+                },
+                Err(command) => ret!((command, args))
+            },
+            _ => ret!()
+        }
+    }
 }
 
 fn update_address(addr: &mut Option<SocketAddr>, host: Option<OsString>, port: Option<OsString>) -> bool {
@@ -121,8 +149,4 @@ fn update_address(addr: &mut Option<SocketAddr>, host: Option<OsString>, port: O
             update_address(addr, host, port)
         }
     }
-}
-
-fn print_usage() {
-    todo!("print_usage");
 }
