@@ -11,7 +11,7 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn new<T: TryInto<Command, Error=()>>(input: T) -> Option<Self> {
+    pub fn new<T: TryInto<Command>>(input: T) -> Option<Self> {
         match input.try_into() {
             Ok(command) => Some(command),
             _ => None
