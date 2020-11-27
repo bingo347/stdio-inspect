@@ -11,11 +11,16 @@ pub fn collect_config() -> AppConfig {
 }
 
 #[derive(Debug)]
-pub struct AppConfig {
-    pub command: Option<Command>,
-    pub udp: Option<SocketAddr>,
-    pub view_only: bool,
-    pub gui: bool
+pub enum AppConfig {
+    Run {
+        command: Command,
+        udp: Option<SocketAddr>,
+        gui: bool
+    },
+    View {
+        udp: SocketAddr,
+        gui: bool
+    }
 }
 
 macro_rules! print_usage {
@@ -76,10 +81,11 @@ impl AppConfig {
             _ => error!("Unknown argument {}", arg)
         });
         let udp = make_udp(host, port, view_only);
-        match view_only {
-            true if udp.is_none() => error!("View only mode required udp port"),
-            false if command.is_none() => error!("<executable> required"),
-            _ => Self { command, view_only, gui, udp }
+        match (view_only, command, udp) {
+            (true, _, None) => error!("View mode required udp port"),
+            (false, None, _) => error!("<executable> required"),
+            (false, Some(command), udp) => AppConfig::Run { command, udp, gui },
+            (true, _, Some(udp)) => AppConfig::View { udp, gui }
         }
     }
 }
