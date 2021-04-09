@@ -17,6 +17,8 @@ impl Command {
             _ => None,
         }
     }
+
+    pub fn run(&self) {}
 }
 
 macro_rules! impl_try_from {

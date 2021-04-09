@@ -1,7 +1,13 @@
 mod command;
 mod config;
 
+use config::AppConfig::Run;
+
 fn main() {
-    let config = config::collect_config();
-    println!("{:?}", config)
+    match config::collect_config() {
+        Run { command, .. } => {
+            command.run();
+        }
+        _ => todo!(),
+    }
 }
