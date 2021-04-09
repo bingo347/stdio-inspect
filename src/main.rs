@@ -1,5 +1,5 @@
-mod config;
 mod command;
+mod config;
 
 fn main() {
     let config = config::collect_config();

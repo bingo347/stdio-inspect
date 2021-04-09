@@ -1,8 +1,8 @@
-use std::env;
-use std::net::SocketAddr;
-use std::ffi::OsString;
-use std::process;
 use env::ArgsOs;
+use std::env;
+use std::ffi::OsString;
+use std::net::SocketAddr;
+use std::process;
 
 use crate::command::Command;
 
@@ -15,18 +15,21 @@ pub enum AppConfig {
     Run {
         command: Command,
         udp: Option<SocketAddr>,
-        gui: bool
+        gui: bool,
     },
     View {
         udp: SocketAddr,
-        gui: bool
-    }
+        gui: bool,
+    },
 }
 
 macro_rules! print_usage {
-    () => { print_usage!(0) };
+    () => {
+        print_usage!(0)
+    };
     ($code:expr) => {{
-        eprint!("Standard IO inspecting tool
+        eprint!(
+            "Standard IO inspecting tool
 
 USAGE:
     stdio-inspect [OPTIONS] <executable> [ARGS]
@@ -47,7 +50,8 @@ EXAMPLES:
         - listen UPD port 9000 and print it to stdout
     stdio-inspect --port 9000 --gui -
         - listen UPD port 9000 and show it in GUI
-");
+"
+        );
         process::exit($code)
     }};
 }
@@ -78,25 +82,29 @@ impl AppConfig {
             "--host" | "-h" => host = args.next(),
             "--port" | "-p" => port = args.next(),
             "--help" | "-?" => print_usage!(),
-            _ => error!("Unknown argument {}", arg)
+            _ => error!("Unknown argument {}", arg),
         });
         let udp = make_udp(host, port, view_only);
         match (view_only, command, udp) {
             (true, _, None) => error!("View mode required udp port"),
             (false, None, _) => error!("<executable> required"),
             (false, Some(command), udp) => AppConfig::Run { command, udp, gui },
-            (true, _, Some(udp)) => AppConfig::View { udp, gui }
+            (true, _, Some(udp)) => AppConfig::View { udp, gui },
         }
     }
 }
 
 fn read_args<Matcher>(mut matcher: Matcher) -> Option<Command>
 where
-    Matcher: FnMut(&str, &mut ArgsOs)
+    Matcher: FnMut(&str, &mut ArgsOs),
 {
     macro_rules! ret {
-        () => { return None; };
-        ($input:expr) => { return Command::new($input); };
+        () => {
+            return None;
+        };
+        ($input:expr) => {
+            return Command::new($input);
+        };
     }
     let mut args = env::args_os();
     args.next().expect("First argument always some executable");
@@ -104,41 +112,57 @@ where
         match args.next() {
             Some(arg) => match arg.into_string() {
                 Ok(arg) => {
-                    if !arg.starts_with('-') { ret!((arg, args)) }
+                    if !arg.starts_with('-') {
+                        ret!((arg, args))
+                    }
                     match arg.as_ref() {
                         "--" => ret!(args),
-                        other => matcher(other, &mut args)
+                        other => matcher(other, &mut args),
                     }
-                },
-                Err(command) => ret!((command, args))
+                }
+                Err(command) => ret!((command, args)),
             },
-            _ => ret!()
+            _ => ret!(),
         }
     }
 }
 
 fn make_udp(host: Option<OsString>, port: Option<OsString>, view_only: bool) -> Option<SocketAddr> {
     use std::net::{IpAddr, Ipv6Addr};
-    fn err(arg_name: &str) -> ! { error!("Invalid argument {}", arg_name); }
+    fn err(arg_name: &str) -> ! {
+        error!("Invalid argument {}", arg_name);
+    }
     match port {
         Some(port) => {
             let port = port.into_string().unwrap_or_else(|_| err("port"));
             let port: u16 = port.parse().unwrap_or_else(|_| err("port"));
-            Some(SocketAddr::new(match host {
-                Some(host) => {
-                    let host = host.into_string().unwrap_or_else(|_| err("host"));
-                    if host == "localhost" {
-                        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
-                    } else {
-                        host.parse().unwrap_or_else(|_| err("host"))
+            Some(SocketAddr::new(
+                match host {
+                    Some(host) => {
+                        let host = host.into_string().unwrap_or_else(|_| err("host"));
+                        if host == "localhost" {
+                            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                        } else {
+                            host.parse().unwrap_or_else(|_| err("host"))
+                        }
                     }
+                    _ => IpAddr::V6(Ipv6Addr::new(
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        if view_only { 0 } else { 1 },
+                    )),
                 },
-                _ => IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, if view_only { 0 } else { 1 }))
-            }, port))
-        },
+                port,
+            ))
+        }
         _ => match host {
             None => None,
-            _ => error!("Host argument without port is not supported")
-        }
+            _ => error!("Host argument without port is not supported"),
+        },
     }
 }

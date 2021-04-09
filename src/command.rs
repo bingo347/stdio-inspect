@@ -1,20 +1,20 @@
 use std::{
-    env::ArgsOs,
     convert::{TryFrom, TryInto},
-    ffi::OsString
+    env::ArgsOs,
+    ffi::OsString,
 };
 
 #[derive(Debug)]
 pub struct Command {
     command: OsString,
-    args: ArgsOs
+    args: ArgsOs,
 }
 
 impl Command {
     pub fn new<T: TryInto<Command>>(input: T) -> Option<Self> {
         match input.try_into() {
             Ok(command) => Some(command),
-            _ => None
+            _ => None,
         }
     }
 }
