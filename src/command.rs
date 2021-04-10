@@ -1,3 +1,4 @@
+use crate::communicator::{Message, StreamKind, DATA_BUFFER_SIZE};
 use std::{
     convert::{TryFrom, TryInto},
     env::ArgsOs,
@@ -7,6 +8,7 @@ use std::{
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
     process::Command as ProcessCommand,
+    sync::broadcast::Sender,
     task::JoinHandle,
 };
 
@@ -24,7 +26,7 @@ impl Command {
         }
     }
 
-    pub async fn run(self) -> i32 {
+    pub async fn run(self, sender: Sender<Message>) -> i32 {
         let mut child_process = ProcessCommand::new(self.command)
             .args(self.args)
             .stdin(Stdio::piped())
@@ -35,9 +37,9 @@ impl Command {
         let stdin = child_process.stdin.take().unwrap();
         let stdout = child_process.stdout.take().unwrap();
         let stderr = child_process.stderr.take().unwrap();
-        proxy_stream(io::stdin(), stdin);
-        proxy_stream(stdout, io::stdout());
-        proxy_stream(stderr, io::stderr());
+        proxy_stream(io::stdin(), stdin, StreamKind::Stdin, &sender);
+        proxy_stream(stdout, io::stdout(), StreamKind::Stdout, &sender);
+        proxy_stream(stderr, io::stderr(), StreamKind::Stderr, &sender);
         let status = child_process
             .wait()
             .await
@@ -70,19 +72,27 @@ impl_try_from![(String, ArgsOs) => |(command, args)| {
     Ok(Self { command, args })
 }];
 
-fn proxy_stream<R, W>(mut r: R, mut w: W) -> JoinHandle<()>
+fn proxy_stream<R, W>(
+    mut r: R,
+    mut w: W,
+    kind: StreamKind,
+    sender: &Sender<Message>,
+) -> JoinHandle<()>
 where
     R: AsyncReadExt + Unpin + Send + 'static,
     W: AsyncWriteExt + Unpin + Send + 'static,
 {
+    let sender = sender.clone();
     tokio::spawn(async move {
-        let mut buffer = [0; 8];
+        let mut buffer = [0; DATA_BUFFER_SIZE];
         loop {
             let n = r.read(&mut buffer).await.unwrap();
             if n == 0 {
                 break;
             }
-            w.write(&buffer[..n]).await.unwrap();
+            let data_chunk = &buffer[..n];
+            sender.send(Message::new(kind, data_chunk)).unwrap();
+            w.write(data_chunk).await.unwrap();
         }
     })
 }
