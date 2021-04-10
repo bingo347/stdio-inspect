@@ -1,4 +1,28 @@
-pub const DATA_BUFFER_SIZE: usize = 8;
+const fn get_buffer_size() -> usize {
+    const DEFAULT: usize = 8;
+    let s = match option_env!("BUFFER_SIZE") {
+        Some(s) => s,
+        None => "",
+    };
+    let s = s.as_bytes();
+    if s.len() == 0 {
+        return DEFAULT;
+    }
+    let mut r = 0;
+    let mut i = 0;
+    while i < s.len() {
+        let ch = s[i];
+        if ch < b'0' || ch > b'9' {
+            return DEFAULT;
+        }
+        r *= 10;
+        r += (ch - b'0') as usize;
+        i += 1;
+    }
+    r
+}
+
+pub const DATA_BUFFER_SIZE: usize = get_buffer_size();
 
 #[derive(Debug, Clone, Copy)]
 pub enum StreamKind {
