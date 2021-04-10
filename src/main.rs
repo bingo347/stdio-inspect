@@ -3,10 +3,12 @@ mod config;
 
 use config::AppConfig::Run;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     match config::collect_config() {
         Run { command, .. } => {
-            command.run();
+            let code = command.run().await;
+            std::process::exit(code);
         }
         _ => todo!(),
     }

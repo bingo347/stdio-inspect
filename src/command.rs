@@ -2,6 +2,12 @@ use std::{
     convert::{TryFrom, TryInto},
     env::ArgsOs,
     ffi::OsString,
+    process::Stdio,
+};
+use tokio::{
+    io::{self, AsyncReadExt, AsyncWriteExt},
+    process::Command as ProcessCommand,
+    task::JoinHandle,
 };
 
 #[derive(Debug)]
@@ -18,7 +24,26 @@ impl Command {
         }
     }
 
-    pub fn run(&self) {}
+    pub async fn run(self) -> i32 {
+        let mut child_process = ProcessCommand::new(self.command)
+            .args(self.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Cannot spawn child process");
+        let stdin = child_process.stdin.take().unwrap();
+        let stdout = child_process.stdout.take().unwrap();
+        let stderr = child_process.stderr.take().unwrap();
+        proxy_stream(io::stdin(), stdin);
+        proxy_stream(stdout, io::stdout());
+        proxy_stream(stderr, io::stderr());
+        let status = child_process
+            .wait()
+            .await
+            .expect("Wait child process failed");
+        status.code().unwrap_or(0)
+    }
 }
 
 macro_rules! impl_try_from {
@@ -44,3 +69,20 @@ impl_try_from![(String, ArgsOs) => |(command, args)| {
     let command = command.into();
     Ok(Self { command, args })
 }];
+
+fn proxy_stream<R, W>(mut r: R, mut w: W) -> JoinHandle<()>
+where
+    R: AsyncReadExt + Unpin + Send + 'static,
+    W: AsyncWriteExt + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut buffer = [0; 8];
+        loop {
+            let n = r.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            w.write(&buffer[..n]).await.unwrap();
+        }
+    })
+}
