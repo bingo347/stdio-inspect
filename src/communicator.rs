@@ -1,3 +1,5 @@
+use std::cmp::PartialEq;
+
 const fn get_buffer_size() -> usize {
     const DEFAULT: usize = 8;
     let s = match option_env!("BUFFER_SIZE") {
@@ -24,7 +26,7 @@ const fn get_buffer_size() -> usize {
 
 pub const DATA_BUFFER_SIZE: usize = get_buffer_size();
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StreamKind {
     Stdin,
     Stdout,
