@@ -6,6 +6,7 @@ use tokio::{
 };
 
 const ACCUMULATOR_CAPACITY: usize = DATA_BUFFER_SIZE * 4;
+const MAX_UDP_BUFFER_SIZE: usize = 32768;
 const TICK_DURATION: Duration = Duration::from_millis(500);
 
 pub async fn start_sender(addr: SocketAddr, mut rx: Receiver<Message>) {
@@ -72,34 +73,54 @@ impl Ticker {
 
 struct Accumulator {
     addr: SocketAddr,
-    last_stream: Option<StreamKind>,
-    stream_data: Vec<u8>,
+    last_kind: Option<StreamKind>,
+    data: Vec<u8>,
 }
 
 impl Accumulator {
     fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
-            last_stream: None,
-            stream_data: Vec::with_capacity(ACCUMULATOR_CAPACITY),
+            last_kind: None,
+            data: Vec::with_capacity(ACCUMULATOR_CAPACITY),
         }
     }
 
     async fn tick(&mut self) {
-        let kind = match self.last_stream {
+        let kind = match self.last_kind {
             Some(k) => k,
             None => return,
         };
-        self.last_stream = None;
-        let data = std::mem::replace(
-            &mut self.stream_data,
-            Vec::with_capacity(ACCUMULATOR_CAPACITY),
-        );
+        let data = self.replace_data_with_empty();
         send_data(&self.addr, kind, data).await;
     }
 
-    async fn push(&mut self, _msg: Message) {
-        // todo!()
+    async fn push(&mut self, msg: Message) {
+        let kind = msg.kind;
+        let data = msg.get_data();
+        match self.last_kind {
+            Some(last_kind) if last_kind == kind => {
+                self.data.extend_from_slice(data);
+                if self.data.len() > MAX_UDP_BUFFER_SIZE {
+                    let data = self.replace_data_with_empty();
+                    send_data(&self.addr, kind, data).await;
+                }
+            }
+            Some(last_kind) => {
+                let data = self.replace_data_with_empty();
+                self.last_kind = Some(kind);
+                send_data(&self.addr, last_kind, data).await;
+            }
+            None => {
+                self.data.extend_from_slice(data);
+                self.last_kind = Some(kind);
+            }
+        }
+    }
+
+    fn replace_data_with_empty(&mut self) -> Vec<u8> {
+        self.last_kind = None;
+        std::mem::replace(&mut self.data, Vec::with_capacity(ACCUMULATOR_CAPACITY))
     }
 }
 
