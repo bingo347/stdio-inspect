@@ -33,7 +33,7 @@ pub enum StreamKind {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    kind: StreamKind,
+    pub kind: StreamKind,
     data: [u8; DATA_BUFFER_SIZE],
     len: usize,
 }
@@ -45,5 +45,9 @@ impl Message {
         let mut data = [0; DATA_BUFFER_SIZE];
         data[..len].copy_from_slice(data_chunk);
         Self { kind, data, len }
+    }
+
+    pub fn get_data(&self) -> &[u8] {
+        &self.data[..self.len]
     }
 }
