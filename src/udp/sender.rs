@@ -47,9 +47,15 @@ impl Ticker {
         let (tx, rx) = watch::channel(());
         tokio::spawn(async move {
             loop {
-                time::sleep(Duration::from_millis(10)).await;
+                let sleep_duration = self
+                    .next_tick_time
+                    .lock()
+                    .await
+                    .saturating_duration_since(Instant::now());
+                time::sleep(sleep_duration).await;
                 let mut next_tick_time = self.next_tick_time.lock().await;
-                if let Some(_) = next_tick_time.checked_duration_since(Instant::now()) {
+                let check_duration = next_tick_time.checked_duration_since(Instant::now());
+                if let Some(_) = check_duration {
                     *next_tick_time = Instant::now() + TICK_DURATION;
                     tx.send(()).unwrap();
                 }
@@ -93,10 +99,10 @@ impl Accumulator {
     }
 
     async fn push(&mut self, _msg: Message) {
-        todo!()
+        // todo!()
     }
 }
 
 async fn send_data(_addr: &SocketAddr, _kind: StreamKind, _data: Vec<u8>) {
-    todo!();
+    // todo!();
 }
