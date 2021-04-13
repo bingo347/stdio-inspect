@@ -1,6 +1,7 @@
 use crate::communicator::{Message, StreamKind, DATA_BUFFER_SIZE};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
+    net::UdpSocket,
     sync::{broadcast::Receiver, watch, Mutex},
     time::{self, Duration, Instant},
 };
@@ -124,6 +125,19 @@ impl Accumulator {
     }
 }
 
-async fn send_data(_addr: &SocketAddr, _kind: StreamKind, _data: Vec<u8>) {
-    // todo!();
+async fn send_data(addr: &SocketAddr, kind: StreamKind, data: Vec<u8>) {
+    let mut data_with_kind = Vec::with_capacity(data.len() + 1);
+    data_with_kind.push(match kind {
+        StreamKind::Stdin => 0,
+        StreamKind::Stdout => 1,
+        StreamKind::Stderr => 2,
+    });
+    data_with_kind.extend_from_slice(&data);
+    let socket = UdpSocket::bind(("::", 0))
+        .await
+        .expect("Cannot bind send socket");
+    socket
+        .send_to(&data_with_kind, addr)
+        .await
+        .expect("Cannot send data to socket");
 }
