@@ -11,9 +11,12 @@ const MAX_UDP_BUFFER_SIZE: usize = 32768;
 const TICK_DURATION: Duration = Duration::from_millis(500);
 
 pub async fn start_sender(addr: SocketAddr, mut rx: Receiver<Message>) {
+    let socket = UdpSocket::bind(("::", 0))
+        .await
+        .expect("Cannot bind send socket");
     let ticker = Ticker::new();
     let mut tick_rx = Arc::clone(&ticker).run();
-    let acc = Arc::new(Mutex::new(Accumulator::new(addr)));
+    let acc = Arc::new(Mutex::new(Accumulator::new(socket, addr)));
     tokio::spawn({
         let acc = Arc::clone(&acc);
         async move {
@@ -73,16 +76,18 @@ impl Ticker {
 }
 
 struct Accumulator {
+    socket: UdpSocket,
     addr: SocketAddr,
-    last_kind: Option<StreamKind>,
     data: Vec<u8>,
+    last_kind: Option<StreamKind>,
 }
 
 impl Accumulator {
-    fn new(addr: SocketAddr) -> Self {
+    fn new(socket: UdpSocket, addr: SocketAddr) -> Self {
         let mut data = Vec::with_capacity(ACCUMULATOR_CAPACITY);
         data.push(255);
         Self {
+            socket,
             addr,
             data,
             last_kind: None,
@@ -95,7 +100,7 @@ impl Accumulator {
             None => return,
         };
         let data = self.replace_data_with_empty();
-        send_data(&self.addr, kind, data).await;
+        send_data(&self.socket, &self.addr, kind, data).await;
     }
 
     async fn push(&mut self, msg: Message) {
@@ -106,13 +111,13 @@ impl Accumulator {
                 self.data.extend_from_slice(data);
                 if self.data.len() > MAX_UDP_BUFFER_SIZE {
                     let data = self.replace_data_with_empty();
-                    send_data(&self.addr, kind, data).await;
+                    send_data(&self.socket, &self.addr, kind, data).await;
                 }
             }
             Some(last_kind) => {
                 let data = self.replace_data_with_empty();
                 self.last_kind = Some(kind);
-                send_data(&self.addr, last_kind, data).await;
+                send_data(&self.socket, &self.addr, last_kind, data).await;
             }
             None => {
                 self.data.extend_from_slice(data);
@@ -129,15 +134,12 @@ impl Accumulator {
     }
 }
 
-async fn send_data(addr: &SocketAddr, kind: StreamKind, mut data: Vec<u8>) {
+async fn send_data(socket: &UdpSocket, addr: &SocketAddr, kind: StreamKind, mut data: Vec<u8>) {
     data[0] = match kind {
         StreamKind::Stdin => 0,
         StreamKind::Stdout => 1,
         StreamKind::Stderr => 2,
     };
-    let socket = UdpSocket::bind(("::", 0))
-        .await
-        .expect("Cannot bind send socket");
     socket
         .send_to(&data, addr)
         .await
