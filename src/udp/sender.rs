@@ -80,10 +80,12 @@ struct Accumulator {
 
 impl Accumulator {
     fn new(addr: SocketAddr) -> Self {
+        let mut data = Vec::with_capacity(ACCUMULATOR_CAPACITY);
+        data.push(255);
         Self {
             addr,
+            data,
             last_kind: None,
-            data: Vec::with_capacity(ACCUMULATOR_CAPACITY),
         }
     }
 
@@ -120,24 +122,24 @@ impl Accumulator {
     }
 
     fn replace_data_with_empty(&mut self) -> Vec<u8> {
+        let mut new_data = Vec::with_capacity(ACCUMULATOR_CAPACITY);
+        new_data.push(255);
         self.last_kind = None;
-        std::mem::replace(&mut self.data, Vec::with_capacity(ACCUMULATOR_CAPACITY))
+        std::mem::replace(&mut self.data, new_data)
     }
 }
 
-async fn send_data(addr: &SocketAddr, kind: StreamKind, data: Vec<u8>) {
-    let mut data_with_kind = Vec::with_capacity(data.len() + 1);
-    data_with_kind.push(match kind {
+async fn send_data(addr: &SocketAddr, kind: StreamKind, mut data: Vec<u8>) {
+    data[0] = match kind {
         StreamKind::Stdin => 0,
         StreamKind::Stdout => 1,
         StreamKind::Stderr => 2,
-    });
-    data_with_kind.extend_from_slice(&data);
+    };
     let socket = UdpSocket::bind(("::", 0))
         .await
         .expect("Cannot bind send socket");
     socket
-        .send_to(&data_with_kind, addr)
+        .send_to(&data, addr)
         .await
         .expect("Cannot send data to socket");
 }
