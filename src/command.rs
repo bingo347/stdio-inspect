@@ -3,6 +3,7 @@ use std::{
     convert::{TryFrom, TryInto},
     env::ArgsOs,
     ffi::OsString,
+    io::ErrorKind,
     process::Stdio,
 };
 use tokio::{
@@ -86,13 +87,24 @@ where
     tokio::spawn(async move {
         let mut buffer = [0; DATA_BUFFER_SIZE];
         loop {
-            let n = r.read(&mut buffer).await.unwrap();
-            if n == 0 {
-                break;
+            match r.read(&mut buffer).await {
+                Ok(0) => return,
+                Ok(n) => {
+                    let data_chunk = &buffer[..n];
+                    sender
+                        .send(Message::new(kind, data_chunk))
+                        .unwrap_or_default();
+                    w.write_all(data_chunk)
+                        .await
+                        .map_err(|e| (kind, e))
+                        .expect("write stream error");
+                }
+                Err(e) => {
+                    if e.kind() != ErrorKind::Interrupted {
+                        panic!("read stream error: {:?}", (kind, e));
+                    }
+                }
             }
-            let data_chunk = &buffer[..n];
-            sender.send(Message::new(kind, data_chunk)).unwrap();
-            w.write(data_chunk).await.unwrap();
         }
     })
 }
