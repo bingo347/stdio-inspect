@@ -99,8 +99,7 @@ impl Accumulator {
             Some(k) => k,
             None => return,
         };
-        let data = self.replace_data_with_empty();
-        send_data(&self.socket, &self.addr, kind, data).await;
+        self.send_data(kind).await;
     }
 
     async fn push(&mut self, msg: Message) {
@@ -110,14 +109,13 @@ impl Accumulator {
             Some(last_kind) if last_kind == kind => {
                 self.data.extend_from_slice(data);
                 if self.data.len() > MAX_UDP_BUFFER_SIZE {
-                    let data = self.replace_data_with_empty();
-                    send_data(&self.socket, &self.addr, kind, data).await;
+                    self.send_data(kind).await;
+                    self.last_kind = None;
                 }
             }
             Some(last_kind) => {
-                let data = self.replace_data_with_empty();
+                self.send_data(last_kind).await;
                 self.last_kind = Some(kind);
-                send_data(&self.socket, &self.addr, last_kind, data).await;
             }
             None => {
                 self.data.extend_from_slice(data);
@@ -126,22 +124,20 @@ impl Accumulator {
         }
     }
 
-    fn replace_data_with_empty(&mut self) -> Vec<u8> {
-        let mut new_data = Vec::with_capacity(ACCUMULATOR_CAPACITY);
-        new_data.push(255);
-        self.last_kind = None;
-        std::mem::replace(&mut self.data, new_data)
+    async fn send_data(&mut self, kind: StreamKind) {
+        let mut data = {
+            let mut new_data = Vec::with_capacity(ACCUMULATOR_CAPACITY);
+            new_data.push(255);
+            std::mem::replace(&mut self.data, new_data)
+        };
+        data[0] = match kind {
+            StreamKind::Stdin => 0,
+            StreamKind::Stdout => 1,
+            StreamKind::Stderr => 2,
+        };
+        self.socket
+            .send_to(&data, &self.addr)
+            .await
+            .expect("Cannot send data to socket");
     }
-}
-
-async fn send_data(socket: &UdpSocket, addr: &SocketAddr, kind: StreamKind, mut data: Vec<u8>) {
-    data[0] = match kind {
-        StreamKind::Stdin => 0,
-        StreamKind::Stdout => 1,
-        StreamKind::Stderr => 2,
-    };
-    socket
-        .send_to(&data, addr)
-        .await
-        .expect("Cannot send data to socket");
 }
