@@ -69,7 +69,7 @@ impl Ticker {
                 let check_duration = next_tick_time.checked_duration_since(Instant::now());
                 if let Some(_) = check_duration {
                     *next_tick_time = Instant::now() + TICK_DURATION;
-                    tx.send(()).unwrap();
+                    tx.send(()).unwrap_or_default();
                 }
             }
         });
