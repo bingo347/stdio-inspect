@@ -2,7 +2,10 @@ use crate::communicator::{Message, StreamKind, DATA_BUFFER_SIZE};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::UdpSocket,
-    sync::{broadcast::Receiver, watch, Mutex},
+    sync::{
+        broadcast::{error::RecvError, Receiver},
+        watch, Mutex,
+    },
     time::{self, Duration, Instant},
 };
 
@@ -28,7 +31,11 @@ pub async fn start_sender(addr: SocketAddr, mut rx: Receiver<Message>) {
     });
     tokio::spawn(async move {
         loop {
-            let msg = rx.recv().await.unwrap();
+            let msg = match rx.recv().await {
+                Ok(msg) => msg,
+                Err(RecvError::Closed) => return,
+                Err(RecvError::Lagged(_)) => continue,
+            };
             ticker.reset().await;
             let mut acc = acc.lock().await;
             acc.push(msg).await;
